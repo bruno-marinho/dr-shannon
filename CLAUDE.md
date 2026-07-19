@@ -80,3 +80,11 @@ building a workaround.
   short explanatory comments over cleverness, especially in the
   arXiv-parsing and prompt-construction code, which reviewers are likely
   to read closely.
+- **Example problems in UI copy must fall within arXiv's strengths**
+  (AI/ML, systems, quantitative methods) — never generic business topics
+  (pricing, churn, org strategy, etc.) that arXiv's corpus can't serve
+  well. arXiv has weak coverage of general business subjects; steering
+  users toward a topic it covers thinly produces a bad first result and
+  undermines the demo. When writing placeholder text, sample copy, or demo
+  scripts, pick problems phrased around applying ML/AI/technical methods
+  to a business context, not the business context alone.

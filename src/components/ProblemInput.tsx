@@ -25,7 +25,7 @@ export function ProblemInput({
       <textarea
         id="problem"
         className="min-h-28 w-full rounded-lg border border-zinc-300 bg-white p-3 text-base outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900"
-        placeholder="e.g. Our subscription churn spikes whenever we raise prices, and we don't know why."
+        placeholder="e.g. Our support team wants to use LLMs for customer answers, but we can't tolerate hallucinated responses — how are teams making this reliable?"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         disabled={disabled}
