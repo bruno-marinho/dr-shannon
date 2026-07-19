@@ -31,12 +31,26 @@ export interface SearchAttempt {
   shannonComment: string;
 }
 
+// Dr. Shannon's structured notes from reading one paper. `source` records
+// how much he actually got to read: the full text (arXiv HTML, or PDF
+// extraction as fallback) or — when a paper resists both — only the
+// abstract, which the note itself discloses in character.
+export interface ReadingNote {
+  arxivId: string;
+  source: "html" | "pdf" | "abstract";
+  notes: string;
+}
+
 export interface Corpus {
   plan: ResearchPlan;
   attempts: SearchAttempt[];
   papers: Paper[];
-  // Synthesized in a separate serverless call (api/specialize) after the
-  // corpus is assembled — absent while that stage is still running.
+  // Produced by the per-paper api/read calls (client-orchestrated, in
+  // parallel) — these notes, not the abstracts, are what Dr. Shannon
+  // speaks from in chat. Absent while the reading stage is running.
+  readingNotes?: ReadingNote[];
+  // Synthesized by api/specialize from the reading notes — absent while
+  // that stage is still running.
   specialization?: string;
 }
 

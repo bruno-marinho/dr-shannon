@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import {
+  READING_NOTES_SYSTEM_PROMPT,
+  readingNotesUserMessage,
   RESEARCH_PLAN_SYSTEM_PROMPT,
   RESEARCH_PLAN_TOOL,
   SPECIALIZATION_SYSTEM_PROMPT,
@@ -58,19 +60,48 @@ export async function generateResearchPlan(problem: string): Promise<ResearchPla
   };
 }
 
+// One reading call: Dr. Shannon reads one paper (full text when we could
+// get it, abstract as last resort) and writes ~500-word structured notes.
+// Runs 10x per session, so it uses the faster model per the CLAUDE.md
+// model split.
+export async function generateReadingNotes(
+  paper: Paper,
+  source: "html" | "pdf" | "abstract",
+  text: string,
+): Promise<string> {
+  const response = await getClient().messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1024,
+    system: READING_NOTES_SYSTEM_PROMPT,
+    messages: [
+      {
+        role: "user",
+        content: readingNotesUserMessage(paper.title, paper.authors, source, text),
+      },
+    ],
+  });
+
+  const block = response.content.find((b) => b.type === "text");
+  if (!block || block.type !== "text") {
+    throw new Error("Model did not return reading notes.");
+  }
+  return block.text.trim();
+}
+
 // Synthesizes the session's specialization blurb — the one dynamic piece
-// of the otherwise fixed persona. Like the research plan, this runs once
-// per session, so it also gets the higher-quality model (see CLAUDE.md).
+// of the otherwise fixed persona — from Dr. Shannon's own reading notes.
+// Like the research plan, this runs once per session, so it gets the
+// higher-quality model (see CLAUDE.md).
 export async function generateSpecialization(
   researchQuestion: string,
-  papers: Paper[],
+  corpus: { title: string; notes: string }[],
 ): Promise<string> {
   const response = await getClient().messages.create({
     model: "claude-opus-4-8",
     max_tokens: 512,
     system: SPECIALIZATION_SYSTEM_PROMPT,
     messages: [
-      { role: "user", content: specializationUserMessage(researchQuestion, papers) },
+      { role: "user", content: specializationUserMessage(researchQuestion, corpus) },
     ],
   });
 

@@ -20,11 +20,17 @@ from whatever papers the search turned up.
 3. Server queries the arXiv API (`export.arxiv.org/api/query` — public, no
    auth, returns Atom XML).
 4. Results are filtered by title + abstract relevance; keep the top 10.
-5. Those 10 papers become the knowledge base. Dr. Shannon's persona (fixed)
-   gets a dynamically written "specialization" blurb derived from the
-   corpus.
-6. User chats with Dr. Shannon. Answers must be grounded ONLY in the
-   10-paper corpus, with every claim citing which paper supports it.
+5. Dr. Shannon READS each paper in full — arXiv HTML first, PDF extraction
+   as fallback, abstract as last resort (disclosed in character) — one
+   parallel, client-orchestrated serverless call per paper, producing
+   ~500-word structured reading notes (method, findings, key numbers,
+   limitations) in his voice.
+6. Those 10 reading notes (not the abstracts) become the knowledge base.
+   Dr. Shannon's persona (fixed) gets a dynamically written
+   "specialization" blurb synthesized from the notes.
+7. User chats with Dr. Shannon, who speaks from his reading notes; every
+   claim cites which paper supports it, and for exact wording he points to
+   the paper and section rather than quoting from memory.
 
 ## Key design decisions — already made, do not revisit
 
@@ -61,9 +67,11 @@ building a workaround.
 ## Stack
 
 - **Framework:** Next.js (App Router), Tailwind CSS
-- **Deploy target:** Vercel, Hobby plan (mind the 10s serverless function
-  timeout on Hobby — arXiv + LLM calls must fit inside it, or must be
-  streamed/chunked to avoid hitting it)
+- **Deploy target:** Vercel, Hobby plan. Function limit is 300s default
+  and max with Fluid compute (verified against Vercel docs 2026-07-19 —
+  an earlier 10s assumption here was stale). Keep the pipeline split into
+  small per-stage functions anyway: that's what makes the stage-by-stage
+  transparency UI truthful.
 - **API routes:**
   - one serverless route for the arXiv search + filtering pipeline
   - one serverless route proxying the Anthropic API (the Anthropic API key

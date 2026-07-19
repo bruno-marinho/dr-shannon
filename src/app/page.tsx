@@ -6,21 +6,29 @@ import { PipelineStatus } from "@/components/PipelineStatus";
 import { PaperList } from "@/components/PaperList";
 import { ChatPanel } from "@/components/ChatPanel";
 import { DR_SHANNON_BIO } from "@/lib/prompts";
-import type { Corpus } from "@/lib/types";
+import type { Corpus, ReadingNote } from "@/lib/types";
+
+// How many papers Dr. Shannon reads at once. Bounded to stay polite to
+// arXiv (each read fetches one paper from arxiv.org) while keeping the
+// whole reading stage around 40-60s for a 10-paper corpus.
+const READ_CONCURRENCY = 4;
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
+  const [readProgress, setReadProgress] = useState<{ done: number; total: number } | null>(null);
   const [specializing, setSpecializing] = useState(false);
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Client-orchestrated pipeline: each stage is its own fast serverless
-  // call (Hobby-plan timeout), which is also what makes the stage-by-stage
-  // status display truthful rather than decorative.
+  // Client-orchestrated pipeline: research → per-paper reading (parallel)
+  // → specialization. Each stage is its own fast serverless call, which is
+  // also what makes the stage-by-stage status display truthful rather
+  // than decorative.
   async function handleSubmit(problem: string) {
     setLoading(true);
     setError(null);
     setCorpus(null);
+    setReadProgress(null);
 
     try {
       const res = await fetch("/api/research", {
@@ -38,24 +46,62 @@ export default function Home() {
       setCorpus(researched);
       setLoading(false);
 
-      if (researched.papers.length > 0) {
-        setSpecializing(true);
-        try {
-          const specRes = await fetch("/api/specialize", {
+      if (researched.papers.length === 0) return;
+
+      // Reading stage: one api/read call per paper, READ_CONCURRENCY at
+      // a time, with live progress.
+      const papers = researched.papers;
+      setReadProgress({ done: 0, total: papers.length });
+      const notes: ReadingNote[] = new Array(papers.length);
+      let done = 0;
+      let next = 0;
+      async function worker() {
+        while (next < papers.length) {
+          const i = next++;
+          const readRes = await fetch("/api/read", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              researchQuestion: researched.plan.researchQuestion,
-              papers: researched.papers,
-            }),
+            body: JSON.stringify({ paper: papers[i] }),
           });
-          const specData = await specRes.json();
-          if (specRes.ok) {
-            setCorpus({ ...researched, specialization: specData.specialization });
+          if (readRes.ok) {
+            notes[i] = (await readRes.json()) as ReadingNote;
+          } else {
+            // A failed read degrades to an abstract-only note client-side
+            // rather than sinking the session.
+            notes[i] = {
+              arxivId: papers[i].arxivId,
+              source: "abstract",
+              notes: `Only the abstract made it into my notes for this one — the paper resisted extraction. What it claims: ${papers[i].abstract}`,
+            };
           }
-        } finally {
-          setSpecializing(false);
+          done++;
+          setReadProgress({ done, total: papers.length });
         }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(READ_CONCURRENCY, papers.length) }, worker),
+      );
+      setReadProgress(null);
+      const read = { ...researched, readingNotes: notes };
+      setCorpus(read);
+
+      // Specialization stage, from the reading notes.
+      setSpecializing(true);
+      try {
+        const specRes = await fetch("/api/specialize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            researchQuestion: read.plan.researchQuestion,
+            corpus: papers.map((p, i) => ({ title: p.title, notes: notes[i].notes })),
+          }),
+        });
+        const specData = await specRes.json();
+        if (specRes.ok) {
+          setCorpus({ ...read, specialization: specData.specialization });
+        }
+      } finally {
+        setSpecializing(false);
       }
     } finally {
       setLoading(false);
@@ -120,10 +166,16 @@ export default function Home() {
             <>
               <section className="flex flex-col gap-2">
                 <h2 className="text-lg font-medium">This session&apos;s specialization</h2>
+                {readProgress && (
+                  <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
+                    Reading the papers — properly, not just the abstracts. {readProgress.done} of{" "}
+                    {readProgress.total} done...
+                  </p>
+                )}
                 {specializing && (
                   <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
-                    Reading through {corpus.papers.length} abstracts and working out what they
-                    make me qualified to say...
+                    Going back through my notes and working out what they make me qualified to
+                    say...
                   </p>
                 )}
                 {corpus.specialization && (
