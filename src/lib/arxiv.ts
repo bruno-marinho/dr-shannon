@@ -10,18 +10,45 @@ function formatArxivDate(isoDate: string, endOfDay: boolean): string {
   return `${digits}${endOfDay ? "2359" : "0000"}`;
 }
 
-// Combines the search strings with OR (any one matching is a candidate)
-// and ANDs in the submitted-date range. Each search string is quoted as a
-// phrase against the "all fields" index — arXiv's query language requires
-// uppercase AND/OR/ANDNOT and rejects unquoted multi-word terms.
+// A search string is a flat boolean expression of short terms joined by
+// uppercase AND/OR (the format contract enforced by the prompt in
+// prompts.ts). Split it into just the terms, e.g. for relevance scoring.
+export function termsOf(searchString: string): string[] {
+  return searchString
+    .split(/\s+(?:AND|OR)\s+/)
+    .map((t) => t.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean);
+}
+
+// Turns one flat search string ("hallucination detection AND customer
+// support") into arXiv query syntax: each term becomes a quoted phrase
+// against the all-fields index, operators pass through. arXiv requires
+// uppercase AND/OR and rejects unquoted multi-word terms.
+function fieldedExpression(searchString: string): string {
+  return searchString
+    .split(/\s+(AND|OR)\s+/)
+    .map((part) =>
+      part === "AND" || part === "OR" ? part : `all:"${part.trim().replace(/^"|"$/g, "")}"`,
+    )
+    .join(" ");
+}
+
 function buildSearchQuery(
-  searchStrings: string[],
+  searchString: string,
+  categories: string[],
   dateRange: { from: string; to: string },
 ): string {
-  const terms = searchStrings.map((s) => `all:"${s}"`).join(" OR ");
+  const clauses = [`(${fieldedExpression(searchString)})`];
+
+  if (categories.length > 0) {
+    clauses.push(`(${categories.map((c) => `cat:${c}`).join(" OR ")})`);
+  }
+
   const from = formatArxivDate(dateRange.from, false);
   const to = formatArxivDate(dateRange.to, true);
-  return `(${terms}) AND submittedDate:[${from} TO ${to}]`;
+  clauses.push(`submittedDate:[${from} TO ${to}]`);
+
+  return clauses.join(" AND ");
 }
 
 interface ArxivEntry {
@@ -58,19 +85,19 @@ function parseEntry(entry: ArxivEntry): Paper {
 
 const parser = new XMLParser({ ignoreAttributes: false });
 
-// Searches arXiv for the given search strings within a date range and
-// returns raw candidate papers (unranked, unfiltered — see lib/relevance.ts
-// for turning this into the final top-10). Returns an empty array, not an
-// error, when arXiv has nothing in range: an over-narrow query is an
-// expected outcome the caller needs to handle, not a failure.
+// Runs ONE rung of the search ladder: a single search string, scoped by
+// category and date range. Returns raw candidates (unranked — see
+// lib/relevance.ts). Returns an empty array, not an error, when nothing
+// matches: a too-narrow rung is an expected outcome the caller handles by
+// falling through to the next, broader rung.
 export async function searchArxiv(
-  searchStrings: string[],
+  searchString: string,
+  categories: string[],
   dateRange: { from: string; to: string },
   maxResults = 30,
 ): Promise<Paper[]> {
-  const searchQuery = buildSearchQuery(searchStrings, dateRange);
   const url = new URL(ARXIV_API_URL);
-  url.searchParams.set("search_query", searchQuery);
+  url.searchParams.set("search_query", buildSearchQuery(searchString, categories, dateRange));
   url.searchParams.set("start", "0");
   url.searchParams.set("max_results", String(maxResults));
   url.searchParams.set("sortBy", "relevance");

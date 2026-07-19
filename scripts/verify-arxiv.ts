@@ -13,17 +13,17 @@ import { rankByRelevance } from "../src/lib/relevance";
 
 async function run(
   label: string,
-  searchStrings: string[],
+  searchString: string,
   dateRange: { from: string; to: string },
 ) {
   console.log(`\n=== ${label} ===`);
-  console.log("search strings:", searchStrings);
+  console.log("search string:", searchString);
   console.log("date range:", dateRange);
 
-  const candidates = await searchArxiv(searchStrings, dateRange);
+  const candidates = await searchArxiv(searchString, [], dateRange);
   console.log(`arXiv returned ${candidates.length} raw candidate(s)`);
 
-  const top = rankByRelevance(candidates, searchStrings);
+  const top = rankByRelevance(candidates, searchString);
   console.log(`top ${top.length} after relevance ranking:`);
   top.forEach((p, i) => {
     console.log(`  [${i + 1}] ${p.title} (${p.publishedDate})`);
@@ -35,7 +35,7 @@ async function main() {
   // Case 1: a frontier AI/ML topic arXiv covers well, wide date range.
   await run(
     "well-covered topic, wide date range",
-    ["LLM hallucination detection", "retrieval augmented generation reliability"],
+    "LLM hallucination detection OR retrieval augmented generation reliability",
     { from: "2023-01-01", to: "2026-07-19" },
   );
 
@@ -43,7 +43,7 @@ async function main() {
   // with a one-day date range. Expected: few or zero results, no crash.
   await run(
     "over-narrow query, one-day range (expected few/zero results)",
-    ["zzflorbnitz quantum toaster scheduling heuristics"],
+    "zzflorbnitz quantum toaster scheduling heuristics",
     { from: "2026-07-18", to: "2026-07-19" },
   );
 }

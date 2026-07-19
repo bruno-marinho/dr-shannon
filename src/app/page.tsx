@@ -56,6 +56,30 @@ export default function Home() {
             <p className="text-sm text-zinc-600 dark:text-zinc-300">
               {corpus.plan.researchQuestion}
             </p>
+            <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
+              {corpus.plan.rationale}
+            </p>
+          </section>
+
+          <section className="flex flex-col gap-2">
+            <h2 className="text-lg font-medium">Search trail</h2>
+            <ol className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+              {corpus.attempts.map((attempt, i) => (
+                <li key={i} className="flex flex-col">
+                  {attempt.shannonComment && (
+                    <span className="italic text-zinc-500 dark:text-zinc-400">
+                      “{attempt.shannonComment}”
+                    </span>
+                  )}
+                  <span>
+                    <code className="rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-zinc-800">
+                      {attempt.searchString}
+                    </code>{" "}
+                    → {attempt.resultCount} result{attempt.resultCount === 1 ? "" : "s"}
+                  </span>
+                </li>
+              ))}
+            </ol>
           </section>
 
           <section className="flex flex-col gap-2">
