@@ -42,6 +42,10 @@ from whatever papers the search turned up.
 - **No semantic sophistication needed.** Simple relevance scoring (e.g.
   keyword/term overlap in title+abstract) is sufficient. Do not build
   embeddings or vector search for this MVP.
+- **Model split by call frequency.** The problem → research-plan
+  translation runs once per session and uses `claude-opus-4-8` (spend
+  quality where it runs once). Chat with Dr. Shannon runs many times per
+  session and uses `claude-sonnet-4-6`.
 
 ## Explicitly out of scope for this MVP
 
