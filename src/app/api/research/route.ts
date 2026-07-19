@@ -48,15 +48,9 @@ export async function POST(request: Request) {
     }
   }
 
-  const corpus: Corpus = {
-    plan,
-    attempts,
-    papers,
-    specialization:
-      papers.length > 0
-        ? `For this session, Dr. Shannon is speaking from ${papers.length} arXiv papers on this question. (Specialization synthesis lands in Phase 3.)`
-        : "Even the broadest search found nothing on arXiv — the problem may sit outside the corpus's strengths. Try rephrasing toward the technical side of it.",
-  };
+  // Specialization is synthesized by a separate api/specialize call,
+  // orchestrated by the client after this response arrives.
+  const corpus: Corpus = { plan, attempts, papers };
 
   return NextResponse.json(corpus);
 }

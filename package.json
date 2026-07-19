@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "verify:arxiv": "tsx scripts/verify-arxiv.ts",
-    "verify:plan": "tsx scripts/verify-plan.ts"
+    "verify:plan": "tsx scripts/verify-plan.ts",
+    "verify:specialization": "tsx scripts/verify-specialization.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",

@@ -1,6 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { RESEARCH_PLAN_SYSTEM_PROMPT, RESEARCH_PLAN_TOOL } from "@/lib/prompts";
-import type { ResearchPlan } from "@/lib/types";
+import {
+  RESEARCH_PLAN_SYSTEM_PROMPT,
+  RESEARCH_PLAN_TOOL,
+  SPECIALIZATION_SYSTEM_PROMPT,
+  specializationUserMessage,
+} from "@/lib/prompts";
+import type { Paper, ResearchPlan } from "@/lib/types";
 
 // The Anthropic client reads ANTHROPIC_API_KEY from the environment —
 // server-side only, never exposed to the browser (see CLAUDE.md).
@@ -51,4 +56,27 @@ export async function generateResearchPlan(problem: string): Promise<ResearchPla
     arxivCategories: plan.arxiv_categories.slice(0, 3),
     dateRangeMonths: plan.date_range_months,
   };
+}
+
+// Synthesizes the session's specialization blurb — the one dynamic piece
+// of the otherwise fixed persona. Like the research plan, this runs once
+// per session, so it also gets the higher-quality model (see CLAUDE.md).
+export async function generateSpecialization(
+  researchQuestion: string,
+  papers: Paper[],
+): Promise<string> {
+  const response = await getClient().messages.create({
+    model: "claude-opus-4-8",
+    max_tokens: 512,
+    system: SPECIALIZATION_SYSTEM_PROMPT,
+    messages: [
+      { role: "user", content: specializationUserMessage(researchQuestion, papers) },
+    ],
+  });
+
+  const text = response.content.find((block) => block.type === "text");
+  if (!text || text.type !== "text") {
+    throw new Error("Model did not return a specialization.");
+  }
+  return text.text.trim();
 }

@@ -35,7 +35,9 @@ export interface Corpus {
   plan: ResearchPlan;
   attempts: SearchAttempt[];
   papers: Paper[];
-  specialization: string;
+  // Synthesized in a separate serverless call (api/specialize) after the
+  // corpus is assembled — absent while that stage is still running.
+  specialization?: string;
 }
 
 export interface ChatMessage {
