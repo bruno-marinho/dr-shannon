@@ -2,10 +2,9 @@
 
 import { useState } from "react";
 import { ProblemInput } from "@/components/ProblemInput";
-import { PipelineStatus } from "@/components/PipelineStatus";
 import { PaperList } from "@/components/PaperList";
 import { ChatPanel } from "@/components/ChatPanel";
-import { DR_SHANNON_BIO } from "@/lib/prompts";
+import { DR_SHANNON_BIO, STAGE_ERRORS } from "@/lib/prompts";
 import type { Corpus, ReadingNote } from "@/lib/types";
 
 // How many papers Dr. Shannon reads at once. Bounded to stay polite to
@@ -13,100 +12,129 @@ import type { Corpus, ReadingNote } from "@/lib/types";
 // whole reading stage around 40-60s for a 10-paper corpus.
 const READ_CONCURRENCY = 4;
 
+// The pipeline runs as a small client-side state machine. Each phase maps
+// to exactly one UI state — including its own visible failure state — so
+// no stage can ever fail silently. research and specialize are retryable
+// on their own; reading degrades per-paper and never hard-fails.
+type Phase =
+  | { name: "idle" }
+  | { name: "researching" }
+  | { name: "research_error" }
+  | { name: "reading"; done: number; total: number }
+  | { name: "specializing" }
+  | { name: "specialize_error" }
+  | { name: "ready" };
+
 export default function Home() {
-  const [loading, setLoading] = useState(false);
-  const [readProgress, setReadProgress] = useState<{ done: number; total: number } | null>(null);
-  const [specializing, setSpecializing] = useState(false);
+  const [phase, setPhase] = useState<Phase>({ name: "idle" });
   const [corpus, setCorpus] = useState<Corpus | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The current problem, kept so the research stage can be retried as-is.
+  const [problem, setProblem] = useState("");
 
-  // Client-orchestrated pipeline: research → per-paper reading (parallel)
-  // → specialization. Each stage is its own fast serverless call, which is
-  // also what makes the stage-by-stage status display truthful rather
-  // than decorative.
-  async function handleSubmit(problem: string) {
-    setLoading(true);
-    setError(null);
+  const busy =
+    phase.name === "researching" ||
+    phase.name === "reading" ||
+    phase.name === "specializing";
+
+  // Stage 1 — research. On failure, surface a retryable error rather than
+  // letting a thrown request vanish (the production silent-failure bug).
+  async function runResearch(p: string) {
+    setPhase({ name: "researching" });
     setCorpus(null);
-    setReadProgress(null);
-
     try {
       const res = await fetch("/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ problem }),
+        body: JSON.stringify({ problem: p }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "Something went wrong.");
+      if (!res.ok) throw new Error("research failed");
+      const researched = (await res.json()) as Corpus;
+      setCorpus(researched);
+      if (researched.papers.length === 0) {
+        setPhase({ name: "ready" });
         return;
       }
+      await runReads(researched);
+    } catch {
+      setPhase({ name: "research_error" });
+    }
+  }
 
-      const researched = data as Corpus;
-      setCorpus(researched);
-      setLoading(false);
+  // Stage 2 — reading. One api/read per paper, bounded concurrency, live
+  // progress. A failed read degrades to an abstract-only note in character,
+  // so a single bad paper never sinks the stage; then reading flows
+  // straight into specialization.
+  async function runReads(base: Corpus) {
+    const papers = base.papers;
+    setPhase({ name: "reading", done: 0, total: papers.length });
 
-      if (researched.papers.length === 0) return;
-
-      // Reading stage: one api/read call per paper, READ_CONCURRENCY at
-      // a time, with live progress.
-      const papers = researched.papers;
-      setReadProgress({ done: 0, total: papers.length });
-      const notes: ReadingNote[] = new Array(papers.length);
-      let done = 0;
-      let next = 0;
-      async function worker() {
-        while (next < papers.length) {
-          const i = next++;
-          const readRes = await fetch("/api/read", {
+    const notes: ReadingNote[] = new Array(papers.length);
+    let done = 0;
+    let next = 0;
+    async function worker() {
+      while (next < papers.length) {
+        const i = next++;
+        try {
+          const res = await fetch("/api/read", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ paper: papers[i] }),
           });
-          if (readRes.ok) {
-            notes[i] = (await readRes.json()) as ReadingNote;
-          } else {
-            // A failed read degrades to an abstract-only note client-side
-            // rather than sinking the session.
-            notes[i] = {
-              arxivId: papers[i].arxivId,
-              source: "abstract",
-              notes: `Only the abstract made it into my notes for this one — the paper resisted extraction. What it claims: ${papers[i].abstract}`,
-            };
-          }
-          done++;
-          setReadProgress({ done, total: papers.length });
+          if (!res.ok) throw new Error("read failed");
+          notes[i] = (await res.json()) as ReadingNote;
+        } catch {
+          notes[i] = {
+            arxivId: papers[i].arxivId,
+            source: "abstract",
+            notes: `Only the abstract made it into my notes for this one — the paper resisted extraction. What it claims: ${papers[i].abstract}`,
+          };
         }
+        done++;
+        setPhase({ name: "reading", done, total: papers.length });
       }
-      await Promise.all(
-        Array.from({ length: Math.min(READ_CONCURRENCY, papers.length) }, worker),
-      );
-      setReadProgress(null);
-      const read = { ...researched, readingNotes: notes };
-      setCorpus(read);
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(READ_CONCURRENCY, papers.length) }, worker),
+    );
 
-      // Specialization stage, from the reading notes.
-      setSpecializing(true);
-      try {
-        const specRes = await fetch("/api/specialize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            researchQuestion: read.plan.researchQuestion,
-            corpus: papers.map((p, i) => ({ title: p.title, notes: notes[i].notes })),
-          }),
-        });
-        const specData = await specRes.json();
-        if (specRes.ok) {
-          setCorpus({ ...read, specialization: specData.specialization });
-        }
-      } finally {
-        setSpecializing(false);
-      }
-    } finally {
-      setLoading(false);
+    const read = { ...base, readingNotes: notes };
+    setCorpus(read);
+    await runSpecialize(read);
+  }
+
+  // Stage 3 — specialization. Retryable on its own: the reading notes
+  // already exist in `corpus`, so a failure here re-runs just this call.
+  async function runSpecialize(base: Corpus) {
+    setPhase({ name: "specializing" });
+    try {
+      const res = await fetch("/api/specialize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          researchQuestion: base.plan.researchQuestion,
+          corpus: base.papers.map((p, i) => ({
+            title: p.title,
+            notes: base.readingNotes![i].notes,
+          })),
+        }),
+      });
+      if (!res.ok) throw new Error("specialize failed");
+      const { specialization } = (await res.json()) as { specialization: string };
+      setCorpus({ ...base, specialization });
+      setPhase({ name: "ready" });
+    } catch {
+      setPhase({ name: "specialize_error" });
     }
   }
+
+  function handleSubmit(p: string) {
+    setProblem(p);
+    runResearch(p);
+  }
+
+  // Chat speaks from the reading notes, so it is available as soon as they
+  // exist — even if the (cosmetic) specialization blurb failed.
+  const chatReady = corpus?.readingNotes && corpus.readingNotes.length > 0;
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-16">
@@ -115,11 +143,25 @@ export default function Home() {
         <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">{DR_SHANNON_BIO}</p>
       </header>
 
-      <ProblemInput disabled={loading || specializing} onSubmit={handleSubmit} />
+      <ProblemInput disabled={busy} onSubmit={handleSubmit} />
 
-      {loading && <PipelineStatus />}
+      {phase.name === "researching" && (
+        <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
+          Turning your problem into a research question and searching arXiv...
+        </p>
+      )}
 
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {phase.name === "research_error" && (
+        <div className="flex flex-col items-start gap-2">
+          <p className="text-sm text-red-600 dark:text-red-400">{STAGE_ERRORS.research}</p>
+          <button
+            onClick={() => runResearch(problem)}
+            className="rounded-full border border-zinc-300 px-4 py-1.5 text-sm font-medium dark:border-zinc-700"
+          >
+            Run it again
+          </button>
+        </div>
+      )}
 
       {corpus && (
         <>
@@ -166,18 +208,35 @@ export default function Home() {
             <>
               <section className="flex flex-col gap-2">
                 <h2 className="text-lg font-medium">This session&apos;s specialization</h2>
-                {readProgress && (
+
+                {phase.name === "reading" && (
                   <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
-                    Reading the papers — properly, not just the abstracts. {readProgress.done} of{" "}
-                    {readProgress.total} done...
+                    Reading the papers — properly, not just the abstracts. {phase.done} of{" "}
+                    {phase.total} done...
                   </p>
                 )}
-                {specializing && (
+
+                {phase.name === "specializing" && (
                   <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
                     Going back through my notes and working out what they make me qualified to
                     say...
                   </p>
                 )}
+
+                {phase.name === "specialize_error" && (
+                  <div className="flex flex-col items-start gap-2">
+                    <p className="text-sm text-red-600 dark:text-red-400">
+                      {STAGE_ERRORS.specialize}
+                    </p>
+                    <button
+                      onClick={() => runSpecialize(corpus)}
+                      className="rounded-full border border-zinc-300 px-4 py-1.5 text-sm font-medium dark:border-zinc-700"
+                    >
+                      Try that step again
+                    </button>
+                  </div>
+                )}
+
                 {corpus.specialization && (
                   <p className="whitespace-pre-line text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                     {corpus.specialization}
@@ -190,10 +249,16 @@ export default function Home() {
                 <PaperList papers={corpus.papers} />
               </section>
 
-              <section className="flex flex-col gap-2">
-                <h2 className="text-lg font-medium">Chat with Dr. Shannon</h2>
-                <ChatPanel corpus={corpus} />
-              </section>
+              {chatReady && (
+                <section className="flex flex-col gap-2">
+                  <h2 className="text-lg font-medium">Chat with Dr. Shannon</h2>
+                  <ChatPanel
+                    researchQuestion={corpus.plan.researchQuestion}
+                    papers={corpus.papers}
+                    readingNotes={corpus.readingNotes!}
+                  />
+                </section>
+              )}
             </>
           )}
         </>

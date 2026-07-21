@@ -18,6 +18,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const specialization = await generateSpecialization(researchQuestion, corpus);
-  return NextResponse.json({ specialization });
+  try {
+    const specialization = await generateSpecialization(researchQuestion, corpus);
+    return NextResponse.json({ specialization });
+  } catch (err) {
+    // JSON 502 → client shows a retryable, stage-scoped error. The reading
+    // notes already exist client-side, so this step re-runs on its own.
+    console.error("specialize route failed:", err);
+    return NextResponse.json({ error: "specialize_failed" }, { status: 502 });
+  }
 }

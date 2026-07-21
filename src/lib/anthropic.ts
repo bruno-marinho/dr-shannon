@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import {
+  CHAT_SYSTEM_PROMPT,
+  chatCorpusContext,
   READING_NOTES_SYSTEM_PROMPT,
   readingNotesUserMessage,
   RESEARCH_PLAN_SYSTEM_PROMPT,
@@ -7,7 +9,7 @@ import {
   SPECIALIZATION_SYSTEM_PROMPT,
   specializationUserMessage,
 } from "@/lib/prompts";
-import type { Paper, ResearchPlan } from "@/lib/types";
+import type { ChatMessage, Paper, ResearchPlan } from "@/lib/types";
 
 // The Anthropic client reads ANTHROPIC_API_KEY from the environment —
 // server-side only, never exposed to the browser (see CLAUDE.md).
@@ -110,4 +112,22 @@ export async function generateSpecialization(
     throw new Error("Model did not return a specialization.");
   }
   return text.text.trim();
+}
+
+// Streams a chat reply grounded in the session's reading notes. Runs many
+// times per session, so it uses the faster model (see CLAUDE.md). The
+// fixed voice/grounding contract plus the corpus context go in the system
+// prompt; returns the SDK MessageStream for the route to pipe to the
+// client token by token.
+export function streamChat(
+  messages: ChatMessage[],
+  researchQuestion: string,
+  corpus: { title: string; link: string; notes: string }[],
+) {
+  return getClient().messages.stream({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1024,
+    system: `${CHAT_SYSTEM_PROMPT}\n\n${chatCorpusContext(researchQuestion, corpus)}`,
+    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+  });
 }

@@ -181,3 +181,53 @@ export const FALLBACK_MESSAGES = [
   "Hmm — too narrow. Nobody has written on exactly that. Let me widen the net.",
   "Still nothing. Fine. Casting the broadest net the literature allows.",
 ];
+
+// Per-stage failure copy, in Dr. Shannon's voice. Error honesty is part of
+// the transparency thesis: no stage may fail silently, and a stage that
+// broke says so plainly — no blame on the user — and can be re-run on its
+// own without restarting the whole pipeline.
+export const STAGE_ERRORS = {
+  research:
+    "The search fell over — arXiv timed out, most likely, and that's the plumbing, not you. Run it again.",
+  specialize:
+    "I read the papers, then lost the thread writing up what they make me good for. That step re-runs on its own — try it again, no need to start over.",
+  chat: "That reply didn't make it back. Ask me again.",
+};
+
+/*
+ * CHAT CONTRACT — Dr. Shannon in conversation, grounded ONLY in the
+ * reading notes he produced this session. He has read the papers; he
+ * speaks from his notes, cites which paper supports each claim, and for
+ * exact wording points to the paper and section rather than reconstructing
+ * quotes from memory. Off-corpus questions get an honest "the frontier is
+ * thin here," not an answer from general knowledge.
+ */
+export const CHAT_SYSTEM_PROMPT = `You are Dr. Shannon, a senior frontier scientist, now in conversation with the user about the corpus you read this session.
+
+Voice (non-negotiable):
+- First person. Authority earned, never performed. Dry wit, contained curiosity. No exclamation marks.
+- If a sentence could appear in any product's marketing copy, rewrite it.
+
+Grounding (this is the whole point — do not break it):
+- Answer only from your reading notes below. They are the papers you actually read; they are all you know this session.
+- Every substantive claim cites the paper it rests on by its corpus number, like [3]. If two papers support a point, cite both.
+- You keep notes, you do not memorize prose. For an exact quote, a precise number you are not certain you recorded exactly, or specific wording, point the reader to the paper and section — "that's the ablation in [3], Section 4" — rather than reconstructing a quotation from memory. Inventing a quote or a number is the one unforgivable move.
+- If the corpus does not cover what is asked, say so plainly and do not answer from general knowledge. "The frontier is thin here — none of these ten touch that" is a complete, honest answer. You may add what the corpus does cover that sits adjacent, if it helps.
+- Do not inflate. If a claim rests on one paper, on a small model, on a few hundred examples, say so — your notes already flag this; carry it through.`;
+
+// Builds the grounding context appended to the chat system prompt: the
+// research question, then each paper's number, title, link, and Dr.
+// Shannon's own reading notes. Numbering matches the paper list the user
+// sees, so his [n] citations line up with the UI.
+export function chatCorpusContext(
+  researchQuestion: string,
+  corpus: { title: string; link: string; notes: string }[],
+): string {
+  const blocks = corpus
+    .map(
+      (p, i) =>
+        `[${i + 1}] "${p.title}" — ${p.link}\nYour reading notes:\n${p.notes}`,
+    )
+    .join("\n\n");
+  return `This session's research question:\n${researchQuestion}\n\nYour corpus — the ${corpus.length} papers you read, with your own notes on each:\n\n${blocks}`;
+}

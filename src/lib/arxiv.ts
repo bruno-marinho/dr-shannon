@@ -103,7 +103,9 @@ export async function searchArxiv(
   url.searchParams.set("sortBy", "relevance");
   url.searchParams.set("sortOrder", "descending");
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  // arXiv can be slow under load; give it room before aborting. A timeout
+  // here surfaces as a stage error the user can retry, not a silent hang.
+  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) {
     throw new Error(`arXiv API returned ${res.status}`);
   }
