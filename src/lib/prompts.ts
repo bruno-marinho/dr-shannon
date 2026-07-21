@@ -182,6 +182,33 @@ export const FALLBACK_MESSAGES = [
   "Still nothing. Fine. Casting the broadest net the literature allows.",
 ];
 
+// Hand-written persona lines shown at the moment the corpus size and read
+// sources are known — the frontier honesty performed in the persona, not
+// just synthesized into the specialization blurb. Fixed copy (fixed
+// persona), computed from real counts.
+
+// Shown when the search returned a small corpus (fewer than 5, matching
+// the "small" threshold the specialization prompt uses). Distinct from the
+// synthesized blurb: this is Dr. Shannon reacting to the count itself.
+export function thinCorpusNote(count: number): string {
+  return `Only ${count} paper${count === 1 ? "" : "s"} came back for this one. The frontier is thin here — take what follows as the state of a small literature, not a settled one.`;
+}
+
+// One line on how much he actually got to read — full text vs. abstract
+// only. Performs the reading honesty in aggregate, alongside the per-paper
+// source badges.
+export function readingSummary(sources: ("html" | "pdf" | "abstract")[]): string {
+  const full = sources.filter((s) => s !== "abstract").length;
+  const abstractOnly = sources.length - full;
+  if (abstractOnly === 0) {
+    return `I read all ${sources.length} of these in full — not just the abstracts.`;
+  }
+  if (full === 0) {
+    return "Every one of these resisted extraction, so I'm working from abstracts alone. Weigh what I say accordingly.";
+  }
+  return `I read ${full} of these in full; the other ${abstractOnly} resisted extraction, so on ${abstractOnly === 1 ? "that one" : "those"} I'm working from the abstract.`;
+}
+
 // Per-stage failure copy, in Dr. Shannon's voice. Error honesty is part of
 // the transparency thesis: no stage may fail silently, and a stage that
 // broke says so plainly — no blame on the user — and can be re-run on its

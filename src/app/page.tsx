@@ -4,7 +4,12 @@ import { useState } from "react";
 import { ProblemInput } from "@/components/ProblemInput";
 import { PaperList } from "@/components/PaperList";
 import { ChatPanel } from "@/components/ChatPanel";
-import { DR_SHANNON_BIO, STAGE_ERRORS } from "@/lib/prompts";
+import { PipelineStatus, type Phase } from "@/components/PipelineStatus";
+import {
+  DR_SHANNON_BIO,
+  readingSummary,
+  thinCorpusNote,
+} from "@/lib/prompts";
 import type { Corpus, ReadingNote } from "@/lib/types";
 
 // How many papers Dr. Shannon reads at once. Bounded to stay polite to
@@ -12,18 +17,22 @@ import type { Corpus, ReadingNote } from "@/lib/types";
 // whole reading stage around 40-60s for a 10-paper corpus.
 const READ_CONCURRENCY = 4;
 
-// The pipeline runs as a small client-side state machine. Each phase maps
-// to exactly one UI state — including its own visible failure state — so
-// no stage can ever fail silently. research and specialize are retryable
-// on their own; reading degrades per-paper and never hard-fails.
-type Phase =
-  | { name: "idle" }
-  | { name: "researching" }
-  | { name: "research_error" }
-  | { name: "reading"; done: number; total: number }
-  | { name: "specializing" }
-  | { name: "specialize_error" }
-  | { name: "ready" };
+// A corpus with fewer than this many papers gets a "the frontier is thin
+// here" line — the same threshold the specialization prompt treats as small.
+const THIN_CORPUS = 5;
+
+// A consistent section wrapper: a quiet uppercase eyebrow over its content,
+// so the page reads like a structured document rather than a stack of divs.
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
 
 export default function Home() {
   const [phase, setPhase] = useState<Phase>({ name: "idle" });
@@ -138,126 +147,90 @@ export default function Home() {
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-16">
-      <header className="flex flex-col gap-3">
-        <h1 className="text-2xl font-semibold">Dr. Shannon</h1>
+      <header className="flex flex-col gap-3 border-b border-zinc-200 pb-8 dark:border-zinc-800">
+        <h1 className="text-2xl font-semibold tracking-tight">Dr. Shannon</h1>
         <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">{DR_SHANNON_BIO}</p>
       </header>
 
       <ProblemInput disabled={busy} onSubmit={handleSubmit} />
 
-      {phase.name === "researching" && (
-        <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
-          Turning your problem into a research question and searching arXiv...
-        </p>
-      )}
-
-      {phase.name === "research_error" && (
-        <div className="flex flex-col items-start gap-2">
-          <p className="text-sm text-red-600 dark:text-red-400">{STAGE_ERRORS.research}</p>
-          <button
-            onClick={() => runResearch(problem)}
-            className="rounded-full border border-zinc-300 px-4 py-1.5 text-sm font-medium dark:border-zinc-700"
-          >
-            Run it again
-          </button>
-        </div>
-      )}
+      <PipelineStatus
+        phase={phase}
+        onRetryResearch={() => runResearch(problem)}
+        onRetrySpecialize={() => corpus && runSpecialize(corpus)}
+      />
 
       {corpus && (
         <>
-          <section className="flex flex-col gap-2">
-            <h2 className="text-lg font-medium">Research question</h2>
-            <p className="text-sm text-zinc-600 dark:text-zinc-300">
+          <Section title="Research question">
+            <p className="text-sm leading-6 text-zinc-700 dark:text-zinc-200">
               {corpus.plan.researchQuestion}
             </p>
-            <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
+            <p className="text-sm italic leading-6 text-zinc-500 dark:text-zinc-400">
               {corpus.plan.rationale}
             </p>
-          </section>
+          </Section>
 
-          <section className="flex flex-col gap-2">
-            <h2 className="text-lg font-medium">Search trail</h2>
-            <ol className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300">
+          <Section title="Search trail">
+            <ol className="flex flex-col gap-2 text-sm text-zinc-600 dark:text-zinc-300">
               {corpus.attempts.map((attempt, i) => (
-                <li key={i} className="flex flex-col">
+                <li key={i} className="flex flex-col gap-0.5">
                   {attempt.shannonComment && (
                     <span className="italic text-zinc-500 dark:text-zinc-400">
                       “{attempt.shannonComment}”
                     </span>
                   )}
                   <span>
-                    <code className="rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-zinc-800">
+                    <code className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs dark:bg-zinc-800">
                       {attempt.searchString}
                     </code>{" "}
-                    → {attempt.resultCount} result{attempt.resultCount === 1 ? "" : "s"}
+                    <span className="text-zinc-400">→</span> {attempt.resultCount} result
+                    {attempt.resultCount === 1 ? "" : "s"}
                   </span>
                 </li>
               ))}
             </ol>
-          </section>
+          </Section>
 
           {corpus.papers.length === 0 ? (
-            <section className="flex flex-col gap-2">
-              <h2 className="text-lg font-medium">Corpus</h2>
-              <p className="text-sm text-zinc-600 dark:text-zinc-300">
+            <Section title="Corpus">
+              <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                 Even the broadest search found nothing on arXiv — the problem may sit outside
                 the corpus&apos;s strengths. Try rephrasing toward the technical side of it.
               </p>
-            </section>
+            </Section>
           ) : (
             <>
-              <section className="flex flex-col gap-2">
-                <h2 className="text-lg font-medium">This session&apos;s specialization</h2>
-
-                {phase.name === "reading" && (
-                  <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
-                    Reading the papers — properly, not just the abstracts. {phase.done} of{" "}
-                    {phase.total} done...
+              <Section title={`Corpus · ${corpus.papers.length} papers`}>
+                {corpus.papers.length < THIN_CORPUS && (
+                  <p className="text-sm italic leading-6 text-amber-700 dark:text-amber-400">
+                    {thinCorpusNote(corpus.papers.length)}
                   </p>
                 )}
-
-                {phase.name === "specializing" && (
-                  <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
-                    Going back through my notes and working out what they make me qualified to
-                    say...
+                {corpus.readingNotes && (
+                  <p className="text-sm italic leading-6 text-zinc-500 dark:text-zinc-400">
+                    {readingSummary(corpus.readingNotes.map((n) => n.source))}
                   </p>
                 )}
+                <PaperList papers={corpus.papers} readingNotes={corpus.readingNotes} />
+              </Section>
 
-                {phase.name === "specialize_error" && (
-                  <div className="flex flex-col items-start gap-2">
-                    <p className="text-sm text-red-600 dark:text-red-400">
-                      {STAGE_ERRORS.specialize}
-                    </p>
-                    <button
-                      onClick={() => runSpecialize(corpus)}
-                      className="rounded-full border border-zinc-300 px-4 py-1.5 text-sm font-medium dark:border-zinc-700"
-                    >
-                      Try that step again
-                    </button>
-                  </div>
-                )}
-
-                {corpus.specialization && (
-                  <p className="whitespace-pre-line text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              {corpus.specialization && (
+                <Section title="This session's specialization">
+                  <p className="whitespace-pre-line text-sm leading-6 text-zinc-700 dark:text-zinc-200">
                     {corpus.specialization}
                   </p>
-                )}
-              </section>
-
-              <section className="flex flex-col gap-2">
-                <h2 className="text-lg font-medium">Corpus</h2>
-                <PaperList papers={corpus.papers} />
-              </section>
+                </Section>
+              )}
 
               {chatReady && (
-                <section className="flex flex-col gap-2">
-                  <h2 className="text-lg font-medium">Chat with Dr. Shannon</h2>
+                <Section title="Chat with Dr. Shannon">
                   <ChatPanel
                     researchQuestion={corpus.plan.researchQuestion}
                     papers={corpus.papers}
                     readingNotes={corpus.readingNotes!}
                   />
-                </section>
+                </Section>
               )}
             </>
           )}

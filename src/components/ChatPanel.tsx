@@ -77,17 +77,21 @@ export function ChatPanel({
 
   return (
     <div className="flex flex-col gap-3">
-      <div ref={scrollRef} className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+      <div ref={scrollRef} className="flex max-h-[28rem] flex-col gap-3 overflow-y-auto">
         {messages.map((m, i) => (
           <div
             key={i}
             className={
               m.role === "user"
-                ? "self-end rounded-lg bg-zinc-950 px-3 py-2 text-sm text-white dark:bg-zinc-50 dark:text-zinc-950"
-                : "self-start whitespace-pre-line rounded-lg bg-zinc-100 px-3 py-2 text-sm leading-6 dark:bg-zinc-800"
+                ? "max-w-[85%] self-end rounded-2xl rounded-br-sm bg-zinc-950 px-3.5 py-2 text-sm text-white dark:bg-zinc-50 dark:text-zinc-950"
+                : "max-w-[90%] self-start whitespace-pre-line rounded-2xl rounded-bl-sm bg-zinc-100 px-3.5 py-2 text-sm leading-6 dark:bg-zinc-800"
             }
           >
-            {m.content || (m.role === "assistant" && sending ? "…" : m.content)}
+            {m.content ? (
+              m.content
+            ) : (
+              <span className="inline-block animate-pulse text-zinc-400">reading my notes…</span>
+            )}
           </div>
         ))}
       </div>
