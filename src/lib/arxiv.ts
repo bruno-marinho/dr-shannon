@@ -3,6 +3,36 @@ import type { Paper } from "@/lib/types";
 
 const ARXIV_API_URL = "https://export.arxiv.org/api/query";
 
+// arXiv asks API clients to send a descriptive User-Agent and to keep the
+// request rate modest. Anonymous/default clients get throttled harder, so
+// identify ourselves.
+const ARXIV_HEADERS = {
+  "User-Agent": "Dr-Shannon/1.0 (+https://dr-shannon.vercel.app) research-assistant demo",
+};
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Fetches from arXiv with one polite retry on rate-limit / transient
+// errors (429 Too Many Requests, 503 Service Unavailable), honoring the
+// Retry-After header when arXiv sends one. arXiv rate-limits by request
+// rate, so retrying immediately makes a 429 worse — we wait first.
+async function fetchArxiv(url: URL): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      headers: ARXIV_HEADERS,
+      signal: AbortSignal.timeout(15000),
+    });
+    if ((res.status !== 429 && res.status !== 503) || attempt >= 1) {
+      return res;
+    }
+    // Back off before the single retry. Respect Retry-After if present,
+    // otherwise use arXiv's suggested ~3s spacing; cap so we never approach
+    // the function timeout.
+    const retryAfter = Number(res.headers.get("retry-after"));
+    await sleep(Math.min(Number.isFinite(retryAfter) ? retryAfter : 3, 5) * 1000);
+  }
+}
+
 // arXiv's Lucene-backed search only accepts dates as YYYYMMDDHHMM (12
 // digits, no separators) inside a submittedDate:[from TO to] range clause.
 function formatArxivDate(isoDate: string, endOfDay: boolean): string {
@@ -103,9 +133,10 @@ export async function searchArxiv(
   url.searchParams.set("sortBy", "relevance");
   url.searchParams.set("sortOrder", "descending");
 
-  // arXiv can be slow under load; give it room before aborting. A timeout
-  // here surfaces as a stage error the user can retry, not a silent hang.
-  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  // arXiv can be slow or rate-limit under load; fetchArxiv adds a timeout
+  // and one polite backoff-retry on 429/503. A failure here surfaces as a
+  // stage error the user can retry, not a silent hang.
+  const res = await fetchArxiv(url);
   if (!res.ok) {
     throw new Error(`arXiv API returned ${res.status}`);
   }

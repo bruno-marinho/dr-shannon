@@ -264,7 +264,7 @@ export function skimNote(count: number): string {
 // own without restarting the whole pipeline.
 export const STAGE_ERRORS = {
   research:
-    "The search fell over — arXiv timed out, most likely, and that's the plumbing, not you. Run it again.",
+    "The search fell over — arXiv is either throttling me or running slow, and either way it's the plumbing, not you. Give it a few seconds, then run it again.",
   specialize:
     "I read the papers, then lost the thread writing up what they make me good for. That step re-runs on its own — try it again, no need to start over.",
   chat: "That reply didn't make it back. Ask me again.",

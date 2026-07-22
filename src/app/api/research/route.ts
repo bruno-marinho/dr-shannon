@@ -34,6 +34,12 @@ export async function POST(request: Request) {
     let papers: Corpus["papers"] = [];
 
     for (let i = 0; i < plan.searchStrings.length; i++) {
+      // Space out ladder rungs: arXiv rate-limits by request rate, so when
+      // we widen the net we pause first rather than fire back-to-back
+      // requests (which is what was tripping 429s). Rung 1 — the common
+      // case — has no delay.
+      if (i > 0) await new Promise((r) => setTimeout(r, 3000));
+
       const searchString = plan.searchStrings[i];
       const candidates = await searchArxiv(searchString, plan.arxivCategories, dateRange);
 
