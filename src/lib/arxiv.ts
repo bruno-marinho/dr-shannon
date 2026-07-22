@@ -12,24 +12,33 @@ const ARXIV_HEADERS = {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// Fetches from arXiv with one polite retry on rate-limit / transient
-// errors (429 Too Many Requests, 503 Service Unavailable), honoring the
-// Retry-After header when arXiv sends one. arXiv rate-limits by request
-// rate, so retrying immediately makes a 429 worse — we wait first.
+// Fetches from arXiv with one polite retry before giving up. arXiv is a
+// free public API with no SLA: transient timeouts, dropped connections,
+// and rate limits (429/503) all happen in normal operation, and the user
+// should only ever see the stage-failure message when the problem is
+// real. Rate-limit responses honor Retry-After when present; arXiv limits
+// by request rate, so retrying immediately would make a 429 worse — we
+// always wait first.
 async function fetchArxiv(url: URL): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, {
-      headers: ARXIV_HEADERS,
-      signal: AbortSignal.timeout(15000),
-    });
-    if ((res.status !== 429 && res.status !== 503) || attempt >= 1) {
-      return res;
+    try {
+      const res = await fetch(url, {
+        headers: ARXIV_HEADERS,
+        signal: AbortSignal.timeout(15000),
+      });
+      if ((res.status !== 429 && res.status !== 503) || attempt >= 1) {
+        return res;
+      }
+      // Back off before the single retry. Cap the wait so we never
+      // approach the function timeout.
+      const retryAfter = Number(res.headers.get("retry-after"));
+      await sleep(Math.min(Number.isFinite(retryAfter) ? retryAfter : 3, 5) * 1000);
+    } catch (err) {
+      // Timeout or network hiccup: pause briefly and retry once, then
+      // let the error surface as a visible, retryable stage failure.
+      if (attempt >= 1) throw err;
+      await sleep(3000);
     }
-    // Back off before the single retry. Respect Retry-After if present,
-    // otherwise use arXiv's suggested ~3s spacing; cap so we never approach
-    // the function timeout.
-    const retryAfter = Number(res.headers.get("retry-after"));
-    await sleep(Math.min(Number.isFinite(retryAfter) ? retryAfter : 3, 5) * 1000);
   }
 }
 
