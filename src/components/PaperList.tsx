@@ -16,39 +16,44 @@ function SourceBadge({ source }: { source: ReadingNote["source"] }) {
 
 export function PaperList({
   papers,
-  readingNotes,
+  openedNotes,
 }: {
   papers: Paper[];
-  // Aligned with `papers` by index; absent until the reading stage runs.
-  readingNotes?: ReadingNote[];
+  // Session note cache, keyed by arXiv ID. A paper gets a badge once
+  // Dr. Shannon has opened it for some question — so the badges light up
+  // over the conversation, showing exactly which papers he has read.
+  openedNotes?: Record<string, ReadingNote>;
 }) {
   return (
     <ol className="flex flex-col gap-3">
-      {papers.map((paper, i) => (
-        <li
-          key={paper.arxivId}
-          className="rounded-lg border border-zinc-200 bg-white/60 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900/40"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <p className="font-medium leading-snug">
-              <span className="text-zinc-400">[{i + 1}]</span>{" "}
-              <a
-                href={paper.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline decoration-zinc-300 underline-offset-2 hover:decoration-zinc-500 dark:decoration-zinc-600"
-              >
-                {paper.title}
-              </a>
+      {papers.map((paper, i) => {
+        const note = openedNotes?.[paper.arxivId];
+        return (
+          <li
+            key={paper.arxivId}
+            className="rounded-lg border border-zinc-200 bg-white/60 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900/40"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <p className="font-medium leading-snug">
+                <span className="text-zinc-400">[{i + 1}]</span>{" "}
+                <a
+                  href={paper.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline decoration-zinc-300 underline-offset-2 hover:decoration-zinc-500 dark:decoration-zinc-600"
+                >
+                  {paper.title}
+                </a>
+              </p>
+              {note && <SourceBadge source={note.source} />}
+            </div>
+            <p className="mt-1 text-zinc-500 dark:text-zinc-400">
+              {paper.authors.join(", ")} · {paper.publishedDate}
             </p>
-            {readingNotes?.[i] && <SourceBadge source={readingNotes[i].source} />}
-          </div>
-          <p className="mt-1 text-zinc-500 dark:text-zinc-400">
-            {paper.authors.join(", ")} · {paper.publishedDate}
-          </p>
-          <p className="mt-2 leading-6 text-zinc-600 dark:text-zinc-300">{paper.abstract}</p>
-        </li>
-      ))}
+            <p className="mt-2 leading-6 text-zinc-600 dark:text-zinc-300">{paper.abstract}</p>
+          </li>
+        );
+      })}
     </ol>
   );
 }

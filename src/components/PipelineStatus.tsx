@@ -10,31 +10,31 @@ export type Phase =
   | { name: "idle" }
   | { name: "researching" }
   | { name: "research_error" }
-  | { name: "reading"; done: number; total: number }
   | { name: "specializing" }
   | { name: "specialize_error" }
   | { name: "ready" };
 
 type StepState = "pending" | "active" | "done" | "error";
 
-const STEP_LABELS = ["Search", "Read", "Specialize"] as const;
+// The eager pipeline is just two stages now: search arXiv, then skim the
+// abstracts into a first-impressions read. Full-text reading is on demand,
+// per question, and shown in the chat itself.
+const STEP_LABELS = ["Search", "Skim"] as const;
 
-function stepStates(phase: Phase): [StepState, StepState, StepState] {
+function stepStates(phase: Phase): [StepState, StepState] {
   switch (phase.name) {
     case "researching":
-      return ["active", "pending", "pending"];
+      return ["active", "pending"];
     case "research_error":
-      return ["error", "pending", "pending"];
-    case "reading":
-      return ["done", "active", "pending"];
+      return ["error", "pending"];
     case "specializing":
-      return ["done", "done", "active"];
+      return ["done", "active"];
     case "specialize_error":
-      return ["done", "done", "error"];
+      return ["done", "error"];
     case "ready":
-      return ["done", "done", "done"];
+      return ["done", "done"];
     default:
-      return ["pending", "pending", "pending"];
+      return ["pending", "pending"];
   }
 }
 
@@ -102,16 +102,9 @@ export function PipelineStatus({
         </p>
       )}
 
-      {phase.name === "reading" && (
-        <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
-          Reading the papers — properly, not just the abstracts. {phase.done} of {phase.total}{" "}
-          done...
-        </p>
-      )}
-
       {phase.name === "specializing" && (
         <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
-          Going back through my notes and working out what they make me qualified to say...
+          Reading the abstracts and working out where the answers are likely to live...
         </p>
       )}
 

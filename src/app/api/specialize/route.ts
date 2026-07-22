@@ -1,19 +1,19 @@
 import { NextResponse } from "next/server";
 import { generateSpecialization } from "@/lib/anthropic";
 
-// Stage 4 of the client-orchestrated pipeline: synthesize Dr. Shannon's
-// specialization blurb from his own reading notes (produced by the
-// per-paper api/read calls). A separate serverless call so the UI can
-// show this stage happening, per the transparency requirement.
+// The "skim" stage: synthesize Dr. Shannon's first-impressions blurb from
+// the corpus ABSTRACTS (no paper is read in full here — that happens on
+// demand at question time). A separate serverless call so the UI can show
+// this stage happening, per the transparency requirement.
 export async function POST(request: Request) {
   const { researchQuestion, corpus } = (await request.json()) as {
     researchQuestion?: string;
-    corpus?: { title: string; notes: string }[];
+    corpus?: { title: string; abstract: string }[];
   };
 
   if (!researchQuestion || !corpus || corpus.length === 0) {
     return NextResponse.json(
-      { error: "A research question and non-empty reading notes are required." },
+      { error: "A research question and non-empty abstracts are required." },
       { status: 400 },
     );
   }

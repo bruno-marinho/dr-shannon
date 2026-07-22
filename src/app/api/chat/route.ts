@@ -2,19 +2,20 @@ import { NextResponse } from "next/server";
 import { streamChat } from "@/lib/anthropic";
 import type { ChatMessage } from "@/lib/types";
 
-// Dr. Shannon in conversation, grounded only in this session's reading
-// notes (see prompts.ts CHAT_SYSTEM_PROMPT). Streams the reply token by
-// token as plain text so the UI can render it as it arrives.
+// Dr. Shannon's answer, as a consultant grounded in the papers he opened
+// this turn (see prompts.ts CHAT_SYSTEM_PROMPT). `corpus` carries every
+// paper in order, each tagged opened (full notes) or skimmed (abstract).
+// Streams the reply token by token as plain text.
 export async function POST(request: Request) {
   const { messages, researchQuestion, corpus } = (await request.json()) as {
     messages?: ChatMessage[];
     researchQuestion?: string;
-    corpus?: { title: string; link: string; notes: string }[];
+    corpus?: { title: string; link: string; opened: boolean; text: string }[];
   };
 
   if (!messages?.length || !researchQuestion || !corpus?.length) {
     return NextResponse.json(
-      { error: "A message and a read corpus are required." },
+      { error: "A message and the corpus are required." },
       { status: 400 },
     );
   }

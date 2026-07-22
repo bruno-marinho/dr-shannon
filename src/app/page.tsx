@@ -5,17 +5,8 @@ import { ProblemInput } from "@/components/ProblemInput";
 import { PaperList } from "@/components/PaperList";
 import { ChatPanel } from "@/components/ChatPanel";
 import { PipelineStatus, type Phase } from "@/components/PipelineStatus";
-import {
-  DR_SHANNON_BIO,
-  readingSummary,
-  thinCorpusNote,
-} from "@/lib/prompts";
+import { DR_SHANNON_BIO, skimNote, thinCorpusNote } from "@/lib/prompts";
 import type { Corpus, ReadingNote } from "@/lib/types";
-
-// How many papers Dr. Shannon reads at once. Bounded to stay polite to
-// arXiv (each read fetches one paper from arxiv.org) while keeping the
-// whole reading stage around 40-60s for a 10-paper corpus.
-const READ_CONCURRENCY = 4;
 
 // A corpus with fewer than this many papers gets a "the frontier is thin
 // here" line — the same threshold the specialization prompt treats as small.
@@ -39,17 +30,19 @@ export default function Home() {
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   // The current problem, kept so the research stage can be retried as-is.
   const [problem, setProblem] = useState("");
+  // Session note cache, keyed by arXiv ID: papers Dr. Shannon has opened in
+  // full for some question. Lifted here so the corpus badges light up as
+  // the conversation opens papers. A paper is never re-read once cached.
+  const [openedNotes, setOpenedNotes] = useState<Record<string, ReadingNote>>({});
 
-  const busy =
-    phase.name === "researching" ||
-    phase.name === "reading" ||
-    phase.name === "specializing";
+  const busy = phase.name === "researching" || phase.name === "specializing";
 
-  // Stage 1 — research. On failure, surface a retryable error rather than
-  // letting a thrown request vanish (the production silent-failure bug).
+  // Stage 1 — research (translate + arXiv search). On failure, a retryable
+  // error rather than a silently-swallowed request.
   async function runResearch(p: string) {
     setPhase({ name: "researching" });
     setCorpus(null);
+    setOpenedNotes({});
     try {
       const res = await fetch("/api/research", {
         method: "POST",
@@ -63,56 +56,15 @@ export default function Home() {
         setPhase({ name: "ready" });
         return;
       }
-      await runReads(researched);
+      await runSpecialize(researched);
     } catch {
       setPhase({ name: "research_error" });
     }
   }
 
-  // Stage 2 — reading. One api/read per paper, bounded concurrency, live
-  // progress. A failed read degrades to an abstract-only note in character,
-  // so a single bad paper never sinks the stage; then reading flows
-  // straight into specialization.
-  async function runReads(base: Corpus) {
-    const papers = base.papers;
-    setPhase({ name: "reading", done: 0, total: papers.length });
-
-    const notes: ReadingNote[] = new Array(papers.length);
-    let done = 0;
-    let next = 0;
-    async function worker() {
-      while (next < papers.length) {
-        const i = next++;
-        try {
-          const res = await fetch("/api/read", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paper: papers[i] }),
-          });
-          if (!res.ok) throw new Error("read failed");
-          notes[i] = (await res.json()) as ReadingNote;
-        } catch {
-          notes[i] = {
-            arxivId: papers[i].arxivId,
-            source: "abstract",
-            notes: `Only the abstract made it into my notes for this one — the paper resisted extraction. What it claims: ${papers[i].abstract}`,
-          };
-        }
-        done++;
-        setPhase({ name: "reading", done, total: papers.length });
-      }
-    }
-    await Promise.all(
-      Array.from({ length: Math.min(READ_CONCURRENCY, papers.length) }, worker),
-    );
-
-    const read = { ...base, readingNotes: notes };
-    setCorpus(read);
-    await runSpecialize(read);
-  }
-
-  // Stage 3 — specialization. Retryable on its own: the reading notes
-  // already exist in `corpus`, so a failure here re-runs just this call.
+  // Stage 2 — skim. Synthesize the first-impressions blurb from the
+  // ABSTRACTS (no paper is read in full here; that happens on demand in
+  // chat). Retryable on its own.
   async function runSpecialize(base: Corpus) {
     setPhase({ name: "specializing" });
     try {
@@ -121,10 +73,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           researchQuestion: base.plan.researchQuestion,
-          corpus: base.papers.map((p, i) => ({
-            title: p.title,
-            notes: base.readingNotes![i].notes,
-          })),
+          corpus: base.papers.map((p) => ({ title: p.title, abstract: p.abstract })),
         }),
       });
       if (!res.ok) throw new Error("specialize failed");
@@ -141,9 +90,19 @@ export default function Home() {
     runResearch(p);
   }
 
-  // Chat speaks from the reading notes, so it is available as soon as they
-  // exist — even if the (cosmetic) specialization blurb failed.
-  const chatReady = corpus?.readingNotes && corpus.readingNotes.length > 0;
+  // A paper Dr. Shannon opened during chat — cache it (never overwrite; a
+  // paper is read once per session) so its badge lights up in the corpus.
+  function addNote(arxivId: string, note: ReadingNote) {
+    setOpenedNotes((cur) => (cur[arxivId] ? cur : { ...cur, [arxivId]: note }));
+  }
+
+  // Chat works from abstracts + on-demand reads, so it opens once the
+  // corpus exists and the skim has settled (succeeded, or failed but
+  // retryable — the papers are there either way).
+  const chatReady =
+    corpus &&
+    corpus.papers.length > 0 &&
+    (phase.name === "ready" || phase.name === "specialize_error");
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-16">
@@ -201,20 +160,6 @@ export default function Home() {
             </Section>
           ) : (
             <>
-              <Section title={`Corpus · ${corpus.papers.length} papers`}>
-                {corpus.papers.length < THIN_CORPUS && (
-                  <p className="text-sm italic leading-6 text-amber-700 dark:text-amber-400">
-                    {thinCorpusNote(corpus.papers.length)}
-                  </p>
-                )}
-                {corpus.readingNotes && (
-                  <p className="text-sm italic leading-6 text-zinc-500 dark:text-zinc-400">
-                    {readingSummary(corpus.readingNotes.map((n) => n.source))}
-                  </p>
-                )}
-                <PaperList papers={corpus.papers} readingNotes={corpus.readingNotes} />
-              </Section>
-
               {corpus.specialization && (
                 <Section title="This session's specialization">
                   <p className="whitespace-pre-line text-sm leading-6 text-zinc-700 dark:text-zinc-200">
@@ -223,12 +168,27 @@ export default function Home() {
                 </Section>
               )}
 
+              <Section title={`Corpus · ${corpus.papers.length} papers`}>
+                {corpus.papers.length < THIN_CORPUS && (
+                  <p className="text-sm italic leading-6 text-amber-700 dark:text-amber-400">
+                    {thinCorpusNote(corpus.papers.length)}
+                  </p>
+                )}
+                {phase.name === "ready" && (
+                  <p className="text-sm italic leading-6 text-zinc-500 dark:text-zinc-400">
+                    {skimNote(corpus.papers.length)}
+                  </p>
+                )}
+                <PaperList papers={corpus.papers} openedNotes={openedNotes} />
+              </Section>
+
               {chatReady && (
                 <Section title="Chat with Dr. Shannon">
                   <ChatPanel
                     researchQuestion={corpus.plan.researchQuestion}
                     papers={corpus.papers}
-                    readingNotes={corpus.readingNotes!}
+                    openedNotes={openedNotes}
+                    onOpenNote={addNote}
                   />
                 </Section>
               )}

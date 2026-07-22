@@ -8,6 +8,9 @@ import {
   RESEARCH_PLAN_TOOL,
   SPECIALIZATION_SYSTEM_PROMPT,
   specializationUserMessage,
+  TRIAGE_SYSTEM_PROMPT,
+  TRIAGE_TOOL,
+  triageCorpusContext,
 } from "@/lib/prompts";
 import type { ChatMessage, Paper, ResearchPlan } from "@/lib/types";
 
@@ -92,13 +95,13 @@ export async function generateReadingNotes(
   return block.text.trim();
 }
 
-// Synthesizes the session's specialization blurb — the one dynamic piece
-// of the otherwise fixed persona — from Dr. Shannon's own reading notes.
-// Like the research plan, this runs once per session, so it gets the
-// higher-quality model (see CLAUDE.md).
+// Synthesizes the session's "first impressions" blurb from the ABSTRACTS
+// (no paper has been opened yet — reads happen on demand at question
+// time). Runs once per session, so it gets the higher-quality model (see
+// CLAUDE.md).
 export async function generateSpecialization(
   researchQuestion: string,
-  corpus: { title: string; notes: string }[],
+  corpus: { title: string; abstract: string }[],
 ): Promise<string> {
   const response = await getClient().messages.create({
     model: "claude-opus-4-8",
@@ -118,6 +121,42 @@ export async function generateSpecialization(
   return text.text.trim();
 }
 
+// Triage: given a question and the corpus abstracts, decide which 1-3
+// papers to open in full, and write the in-character reading decision the
+// user sees before the answer. Runs many times per session — faster model.
+export interface TriageResult {
+  paperNumbers: number[];
+  readingDecision: string;
+}
+
+export async function generateTriage(
+  messages: ChatMessage[],
+  corpus: { title: string; abstract: string }[],
+): Promise<TriageResult> {
+  const response = await getClient().messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1024,
+    system: `${TRIAGE_SYSTEM_PROMPT}\n\n${triageCorpusContext(corpus)}`,
+    tools: [TRIAGE_TOOL],
+    tool_choice: { type: "tool", name: TRIAGE_TOOL.name },
+    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+  });
+
+  const toolUse = response.content.find((b) => b.type === "tool_use");
+  if (!toolUse || toolUse.type !== "tool_use") {
+    throw new Error("Triage did not return a selection.");
+  }
+  const input = toolUse.input as { paper_numbers: number[]; reading_decision: string };
+
+  // Clamp to valid corpus range and cap at 3 — the schema can't enforce
+  // array bounds in strict mode.
+  const paperNumbers = [...new Set(input.paper_numbers)]
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= corpus.length)
+    .slice(0, 3);
+
+  return { paperNumbers, readingDecision: input.reading_decision.trim() };
+}
+
 // Streams a chat reply grounded in the session's reading notes. Runs many
 // times per session, so it uses the faster model (see CLAUDE.md). The
 // fixed voice/grounding contract plus the corpus context go in the system
@@ -126,7 +165,7 @@ export async function generateSpecialization(
 export function streamChat(
   messages: ChatMessage[],
   researchQuestion: string,
-  corpus: { title: string; link: string; notes: string }[],
+  corpus: { title: string; link: string; opened: boolean; text: string }[],
 ) {
   return getClient().messages.stream({
     model: "claude-sonnet-4-6",

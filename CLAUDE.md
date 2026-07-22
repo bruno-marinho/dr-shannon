@@ -19,18 +19,27 @@ from whatever papers the search turned up.
    strings and a publication date range.
 3. Server queries the arXiv API (`export.arxiv.org/api/query` — public, no
    auth, returns Atom XML).
-4. Results are filtered by title + abstract relevance; keep the top 10.
-5. Dr. Shannon READS each paper in full — arXiv HTML first, PDF extraction
-   as fallback, abstract as last resort (disclosed in character) — one
-   parallel, client-orchestrated serverless call per paper, producing
-   ~500-word structured reading notes (method, findings, key numbers,
-   limitations) in his voice.
-6. Those 10 reading notes (not the abstracts) become the knowledge base.
-   Dr. Shannon's persona (fixed) gets a dynamically written
-   "specialization" blurb synthesized from the notes.
-7. User chats with Dr. Shannon, who speaks from his reading notes; every
-   claim cites which paper supports it, and for exact wording he points to
-   the paper and section rather than quoting from memory.
+4. Results are filtered by title + abstract relevance; keep the top 10
+   (title + abstract only — no full-text reads at this stage).
+5. Dr. Shannon SKIMS the 10 abstracts and writes a first-impressions
+   "specialization" blurb — what the corpus looks like from the abstracts,
+   and which papers he'd open first — owning honestly that it's a skim.
+6. Reading is ON DEMAND, at question time. Per question, Dr. Shannon
+   triages the 10 abstracts against the question, decides which 1-3 papers
+   to open, and shows that reading decision in character BEFORE answering
+   (the user watches him choose). He then reads those papers in full —
+   arXiv HTML first, PDF extraction as fallback, abstract as last resort
+   (disclosed in character) — one client-orchestrated call per paper,
+   producing ~500-word structured reading notes. Notes are cached per
+   session by arXiv ID; a paper is never re-read within a session.
+   Substantive questions must open at least one paper — abstracts are for
+   triage, never for evidence.
+7. Dr. Shannon answers as a CONSULTANT, not a literature reviewer:
+   recommendation first, then the cited evidence from the papers he
+   opened, then caveats framed as "what would change my recommendation."
+   Organized by the decision the user faces, never by paper. Every claim
+   cites which paper supports it; for exact wording he points to the paper
+   and section rather than quoting from memory.
 
 ## Key design decisions — already made, do not revisit
 
