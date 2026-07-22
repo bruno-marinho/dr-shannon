@@ -73,7 +73,9 @@ export async function generateReadingNotes(
 ): Promise<string> {
   const response = await getClient().messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 1024,
+    // ~500-word notes are ~700 tokens; 2048 leaves headroom so a note that
+    // runs long is never cut off mid-sentence.
+    max_tokens: 2048,
     system: READING_NOTES_SYSTEM_PROMPT,
     messages: [
       {
@@ -100,7 +102,9 @@ export async function generateSpecialization(
 ): Promise<string> {
   const response = await getClient().messages.create({
     model: "claude-opus-4-8",
-    max_tokens: 512,
+    // A thin-corpus blurb with several caveats can run long; 1024 keeps it
+    // from being truncated.
+    max_tokens: 1024,
     system: SPECIALIZATION_SYSTEM_PROMPT,
     messages: [
       { role: "user", content: specializationUserMessage(researchQuestion, corpus) },
@@ -126,7 +130,10 @@ export function streamChat(
 ) {
   return getClient().messages.stream({
     model: "claude-sonnet-4-6",
-    max_tokens: 1024,
+    // A grounded answer to a multi-part question is genuinely long — the
+    // old 1024 cap cut replies off mid-sentence. We stream, so a high cap
+    // costs nothing in latency and only bounds pathological runaway output.
+    max_tokens: 8192,
     system: `${CHAT_SYSTEM_PROMPT}\n\n${chatCorpusContext(researchQuestion, corpus)}`,
     messages: messages.map((m) => ({ role: m.role, content: m.content })),
   });
